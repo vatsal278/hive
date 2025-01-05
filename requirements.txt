@@ -3,3 +3,5 @@ flask-socketio
 pyngrok
 nest_asyncio
 openai
+flask_cors
+python-dotenv
