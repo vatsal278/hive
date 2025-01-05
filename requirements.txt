@@ -1,0 +1,5 @@
+flask
+flask-socketio
+pyngrok
+nest_asyncio
+openai
