@@ -13,7 +13,7 @@ import logging
 from flask_cors import CORS
 import threading, os
 from dotenv import load_dotenv
-import eventlet
+
 logging.basicConfig(level=logging.INFO)
 nest_asyncio.apply()
 
@@ -230,10 +230,7 @@ class DiscussionManager:
         file_path = self.storage_path / "discussion.json"
         with open(file_path, "w") as f:
             json.dump(asdict(self.discussion), f, indent=2)
-@app.route("/")
-def home():
-    return jsonify({"message": "Server is running!"})
-    
+
 @app.route("/discussions")
 def get_discussions():
     file_path = Path("discussions/discussion.json")
@@ -261,8 +258,6 @@ def start_discussion(topic: str, api_key: str):
     asyncio.run(manager.start_discussion(topic))
 
 if __name__ == "__main__":
-    eventlet.monkey_patch()
-
     load_dotenv()
     api_key = os.getenv("API_KEY")
 
@@ -274,7 +269,6 @@ if __name__ == "__main__":
         args=("Cryptocurrency Evolution and Future", api_key),
         daemon=True,
     )
-    discussion_thread.start()
 
-    # Use eventlet for production
-    socketio.run(app, host="0.0.0.0", port=5000, debug=False)
+    discussion_thread.start()
+    socketio.run(app, port=5000)
