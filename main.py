@@ -19,7 +19,7 @@ nest_asyncio.apply()
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading", logger=True, engineio_logger=True)
 
 @dataclass
 class Message:
@@ -271,4 +271,4 @@ if __name__ == "__main__":
     )
 
     discussion_thread.start()
-    socketio.run(app, port=5000)
+    socketio.run(app, port=5000, allow_unsafe_werkzeug=True)
