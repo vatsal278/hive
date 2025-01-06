@@ -13,7 +13,7 @@ import logging
 from flask_cors import CORS
 import threading, os
 from dotenv import load_dotenv
-
+import eventlet
 logging.basicConfig(level=logging.INFO)
 nest_asyncio.apply()
 
@@ -258,7 +258,6 @@ def start_discussion(topic: str, api_key: str):
     asyncio.run(manager.start_discussion(topic))
 
 if __name__ == "__main__":
-    import eventlet
     eventlet.monkey_patch()
 
     load_dotenv()
