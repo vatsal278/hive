@@ -258,6 +258,9 @@ def start_discussion(topic: str, api_key: str):
     asyncio.run(manager.start_discussion(topic))
 
 if __name__ == "__main__":
+    import eventlet
+    eventlet.monkey_patch()
+
     load_dotenv()
     api_key = os.getenv("API_KEY")
 
@@ -269,6 +272,7 @@ if __name__ == "__main__":
         args=("Cryptocurrency Evolution and Future", api_key),
         daemon=True,
     )
-
     discussion_thread.start()
-    socketio.run(app, port=5000)
+
+    # Use eventlet for production
+    socketio.run(app, host="0.0.0.0", port=5000, debug=False)
