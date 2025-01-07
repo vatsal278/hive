@@ -352,4 +352,5 @@ if __name__ == "__main__":
         port=5000,
         debug=False,
         use_reloader=False,
+        allow_unsafe_werkzeug=True
     )
