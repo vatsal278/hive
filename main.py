@@ -307,6 +307,7 @@ class DiscussionManager:
         with open(objectives_file, "w") as f:
             json.dump(objectives, f, indent=2)
 
+
 @app.route("/discussions")
 def get_discussions():
     file_path = Path("discussions/discussion.json")
@@ -321,6 +322,26 @@ def get_discussions():
         "agent_traits": s.get("agent_traits", {}),
         "summary": s["summary"]
     } for s in discussion["subtopics"]])
+
+@app.route("/discussions/<subtopic_id>")
+def get_subtopic_details(subtopic_id):
+    file_path = Path("discussions/discussion.json")
+    if not file_path.exists():
+        return jsonify({"error": "No discussions found"}), 404
+        
+    with open(file_path) as f:
+        discussion = json.load(f)
+        for subtopic in discussion["subtopics"]:
+            if subtopic["id"] == subtopic_id:
+                return jsonify({
+                    "topic": subtopic["topic"],
+                    "agents": subtopic["agents"],
+                    "agent_traits": subtopic.get("agent_traits", {}),
+                    "messages": subtopic["messages"],
+                    "summary": subtopic["summary"]
+                })
+                
+    return jsonify({"error": "Subtopic not found"}), 404
 
 @app.route("/objectives")
 def get_objectives():
