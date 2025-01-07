@@ -7,23 +7,32 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from dataclasses import dataclass, asdict, field
 from typing import List, Optional
-from engineio.async_drivers import threading as async_threading
 
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading", logger=True, engineio_logger=True)
+socketio = SocketIO(app, 
+    cors_allowed_origins="*",
+    async_mode="threading",
+    logger=True,
+    engineio_logger=True,
+    ping_timeout=60,
+    ping_interval=25
+)
 
-@socketio.on_error_default
-def default_error_handler(e):
-    logging.error(f'SocketIO error: {str(e)}')
+def safe_emit(event, data):
+    try:
+        socketio.emit(event, data)
+        logging.info(f"Emitted {event}: {data}")
+    except Exception as e:
+        logging.error(f"Socket emission failed: {e}")
 
 @socketio.on('connect')
-def handle_connect():
+def connect():
     logging.info('Client connected')
 
 @socketio.on('disconnect')
-def handle_disconnect():
+def disconnect():
     logging.info('Client disconnected')
 
 @dataclass
@@ -185,7 +194,7 @@ class DiscussionManager:
         self.discussion.subtopics.append(new_subtopic)
         self.discussion.current_subtopic_id = new_subtopic.id
         
-        socketio.emit("current_topic_stream", {
+        safe_emit("current_topic_stream", {
             "subtopic": new_subtopic.topic,
             "history": []
         })
@@ -208,11 +217,11 @@ class DiscussionManager:
                 )
                 subtopic.messages.append(message)
                 
-                socketio.emit("current_topic_stream", {
+                safe_emit("current_topic_stream", {
                     "message": asdict(message),
                     "history": [asdict(msg) for msg in subtopic.messages]
                 })
-                await asyncio.sleep(3)
+                await asyncio.sleep(1)  # Add delay between messages
 
     async def _generate_response(self, agent_info: dict, subtopic: Subtopic) -> str:
         history = "\n".join([f"{m.agent}: {m.content}" for m in subtopic.messages[-5:]])
@@ -268,7 +277,7 @@ class DiscussionManager:
         
         summary = response.choices[0].message.content.strip()
         subtopic.summary = summary
-        socketio.emit("current_topic_stream", {
+        safe_emit("current_topic_stream", {
             "summary": summary,
             "history": [asdict(msg) for msg in subtopic.messages]
         })
@@ -337,7 +346,6 @@ if __name__ == "__main__":
         target=lambda: asyncio.run(DiscussionManager(api_key).start_main_discussion()),
         daemon=True
     )
-
     discussion_thread.start()
     
     socketio.run(app, 
