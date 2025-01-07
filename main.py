@@ -1,17 +1,37 @@
 from openai import OpenAI
 import asyncio, json, time, uuid, logging, os, threading, random
 from pathlib import Path
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_socketio import SocketIO
 from flask_cors import CORS
 from dotenv import load_dotenv
 from dataclasses import dataclass, asdict, field
 from typing import List, Optional
+from engineio.async_drivers import threading as async_threading
 
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, 
+    cors_allowed_origins="*", 
+    async_mode='threading',
+    logger=True,
+    engineio_logger=True,
+    ping_timeout=60,
+    ping_interval=25
+)
+
+@socketio.on_error_default
+def default_error_handler(e):
+    logging.error(f'SocketIO error: {str(e)}')
+
+@socketio.on('connect')
+def handle_connect():
+    logging.info('Client connected')
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    logging.info('Client disconnected')
 
 @dataclass
 class Message:
@@ -183,7 +203,7 @@ class DiscussionManager:
         self._save_discussion()
 
     async def _run_agent_discussion(self, subtopic: Subtopic, custom_agents: List[dict]):
-        for _ in range(10):  # Number of discussion rounds
+        for _ in range(2):  # Number of discussion rounds
             for agent_info in custom_agents:
                 response = await self._generate_response(agent_info, subtopic)
                 
@@ -323,5 +343,13 @@ if __name__ == "__main__":
         target=lambda: asyncio.run(DiscussionManager(api_key).start_main_discussion()),
         daemon=True
     )
+
     discussion_thread.start()
-    socketio.run(app, host="0.0.0.0", port=5000, allow_unsafe_werkzeug=True)
+    
+    socketio.run(app, 
+        host="0.0.0.0", 
+        port=5000,
+        debug=False,
+        use_reloader=False,
+        allow_unsafe_werkzeug=True
+    )
