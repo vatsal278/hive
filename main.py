@@ -1,7 +1,7 @@
 from openai import OpenAI
 import asyncio, json, time, uuid, logging, os, threading, random
 from pathlib import Path
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_socketio import SocketIO
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -11,7 +11,28 @@ from typing import List, Optional
 logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, 
+    cors_allowed_origins="*",
+    async_mode="threading",
+    logger=True,
+    engineio_logger=True,
+    allow_unsafe_werkzeug=True
+)
+
+def safe_emit(event, data):
+    try:
+        socketio.emit(event, data)
+        logging.info(f"Emitted {event}: {data}")
+    except Exception as e:
+        logging.error(f"Socket emission failed: {e}")
+
+@socketio.on('connect')
+def connect():
+    logging.info('Client connected')
+
+@socketio.on('disconnect')
+def disconnect():
+    logging.info('Client disconnected')
 
 @dataclass
 class Message:
@@ -172,7 +193,7 @@ class DiscussionManager:
         self.discussion.subtopics.append(new_subtopic)
         self.discussion.current_subtopic_id = new_subtopic.id
         
-        socketio.emit("current_topic_stream", {
+        safe_emit("current_topic_stream", {
             "subtopic": new_subtopic.topic,
             "history": []
         })
@@ -183,7 +204,7 @@ class DiscussionManager:
         self._save_discussion()
 
     async def _run_agent_discussion(self, subtopic: Subtopic, custom_agents: List[dict]):
-        for _ in range(10):  # Number of discussion rounds
+        for _ in range(2):  # Number of discussion rounds
             for agent_info in custom_agents:
                 response = await self._generate_response(agent_info, subtopic)
                 
@@ -195,10 +216,11 @@ class DiscussionManager:
                 )
                 subtopic.messages.append(message)
                 
-                socketio.emit("current_topic_stream", {
+                safe_emit("current_topic_stream", {
                     "message": asdict(message),
                     "history": [asdict(msg) for msg in subtopic.messages]
                 })
+                await asyncio.sleep(1)  # Add delay between messages
 
     async def _generate_response(self, agent_info: dict, subtopic: Subtopic) -> str:
         history = "\n".join([f"{m.agent}: {m.content}" for m in subtopic.messages[-5:]])
@@ -254,7 +276,7 @@ class DiscussionManager:
         
         summary = response.choices[0].message.content.strip()
         subtopic.summary = summary
-        socketio.emit("current_topic_stream", {
+        safe_emit("current_topic_stream", {
             "summary": summary,
             "history": [asdict(msg) for msg in subtopic.messages]
         })
@@ -324,4 +346,10 @@ if __name__ == "__main__":
         daemon=True
     )
     discussion_thread.start()
-    socketio.run(app, host="0.0.0.0", port=5000, allow_unsafe_werkzeug=True)
+    
+    socketio.run(app, 
+        host="0.0.0.0", 
+        port=5000,
+        debug=False,
+        use_reloader=False,
+    )
