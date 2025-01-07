@@ -73,7 +73,7 @@ class DiscussionManager:
             self.discussion = Discussion(main_topic=main_topic, subtopics=[], current_subtopic_id=None)
             
             start_time = time.time()
-            time_limit = 7200  # 2 hours in seconds
+            time_limit = 50  # 2 hours in seconds
             is_in_discussion = False
             
             while True:
