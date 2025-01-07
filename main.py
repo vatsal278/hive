@@ -212,6 +212,7 @@ class DiscussionManager:
                     "message": asdict(message),
                     "history": [asdict(msg) for msg in subtopic.messages]
                 })
+                await asyncio.sleep(3)
 
     async def _generate_response(self, agent_info: dict, subtopic: Subtopic) -> str:
         history = "\n".join([f"{m.agent}: {m.content}" for m in subtopic.messages[-5:]])
