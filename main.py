@@ -73,7 +73,7 @@ class DiscussionManager:
             self.discussion = Discussion(main_topic=main_topic, subtopics=[], current_subtopic_id=None)
             
             start_time = time.time()
-            time_limit = 7200  # 2 hours in seconds
+            time_limit = 72  # 2 hours in seconds
             is_in_discussion = False
             
             while True:
@@ -113,7 +113,7 @@ class DiscussionManager:
         """
 
         response = self.client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4",
             messages=[
                 {"role": "system", "content": "Design expert agents with rich personality profiles using Ob-[number] format IDs."},
                 {"role": "user", "content": prompt}
@@ -204,7 +204,7 @@ class DiscussionManager:
         self._save_discussion()
 
     async def _run_agent_discussion(self, subtopic: Subtopic, custom_agents: List[dict]):
-        for _ in range(10):  # Number of discussion rounds
+        for _ in range(1):  # Number of discussion rounds
             for agent_info in custom_agents:
                 response = await self._generate_response(agent_info, subtopic)
                 
