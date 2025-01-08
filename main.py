@@ -1,5 +1,5 @@
 from openai import OpenAI
-import asyncio, json, time, uuid, logging, os, threading, random
+import asyncio, json, time, uuid, logging, os, threading
 from pathlib import Path
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO
@@ -64,74 +64,99 @@ class DiscussionManager:
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(exist_ok=True)
         self.discussion = None
+        self.current_topic_index = 0
+        self.is_processing = False
+        self.topics = []
+        self.load_topics_from_env()
+
+    def load_topics_from_env(self):
+        """Load topics from environment variables."""
+        load_dotenv(override=True)  # Reload .env file
+        env_topics = os.getenv("TOPICS", "").split(",")
+        self.topics = [topic.strip() for topic in env_topics if topic.strip()]
+        if self.topics:
+            logging.info(f"Loaded topics from env: {self.topics}")
+        else:
+            logging.warning("No topics found in environment variables")
 
     async def start_main_discussion(self):
-        topics = os.getenv("TOPICS").split(",")
-        for topic in topics:
-            main_topic = topic.strip()
-            logging.info(f"Starting discussion on: {main_topic}")
-            self.discussion = Discussion(main_topic=main_topic, subtopics=[], current_subtopic_id=None)
-            
-            start_time = time.time()
-            time_limit = 7200  # 2 hours in seconds
-            is_in_discussion = False
-            
-            while True:
-                current_time = time.time()
-                if not is_in_discussion and (current_time - start_time) >= time_limit:
-                    break
-                    
-                is_in_discussion = True
-                await self._run_discussion()
+        while True:
+            if not self.topics:
+                self.load_topics_from_env()
+                await asyncio.sleep(10)  # Wait for topics to be added
+                continue
+
+            if self.current_topic_index >= len(self.topics):
+                self.current_topic_index = 0  # Reset to start if we've processed all topics
+                await asyncio.sleep(10)  # Wait before starting new cycle
+                self.load_topics_from_env()  # Check for new topics before starting new cycle
+                continue
+
+            main_topic = self.topics[self.current_topic_index]
+            if not self.is_processing:
+                self.is_processing = True
+                logging.info(f"Starting discussion on: {main_topic}")
+                self.discussion = Discussion(main_topic=main_topic, subtopics=[], current_subtopic_id=None)
+                
+                start_time = time.time()
+                time_limit = 7200  # 2 hours in seconds
                 is_in_discussion = False
                 
-            await self._finalize_discussion()
+                while True:
+                    current_time = time.time()
+                    if not is_in_discussion and (current_time - start_time) >= time_limit:
+                        break
+                        
+                    is_in_discussion = True
+                    await self._run_discussion()
+                    is_in_discussion = False
+                    
+                await self._finalize_discussion()
+                self.is_processing = False
+                self.current_topic_index += 1
+                self.load_topics_from_env()  # Check for new topics after completing current topic
 
     async def _generate_custom_agents(self, subtopic: str) -> List[dict]:
         prompt = f"""
-        Create 4-6 specialized agents for discussing: {subtopic}
-        Each agent should have unique expertise and a distinct personality profile.
+        You are tasked with creating specialized agents for discussing: {subtopic}
+        Each agent must:
+        1. Have a unique ID:
+           - Example: "Ob-123"
+        2. Possess expertise in 2-3 specific areas related to the subtopic:
+           - Example: ["cryptocurrency", "blockchain", "tokenomics"]
+        3. Exhibit a unique personality with the following attributes:
+           - Core Trait: Example: "analytical" or "empathetic"
+           - Secondary Traits: Example: ["logical", "methodical", "creative"]
+           - Communication Style: Example: "formal and structured" or "humorous and engaging"
+           - Strengths: Example: ["ability to break down complex topics", "excellent at persuasion"]
+           - Biases: Example: ["favors quantitative data", "prone to overestimating risks"]
 
-        Return JSON:
-        {{
-          "agents": [
-            {{
-              "id": "Ob-[3 digit number]",
-              "expertise": ["area1", "area2", "area3"],
-              "personality": {{
-                "core_trait": "primary personality characteristic",
-                "traits": ["trait1", "trait2", "trait3"],
-                "communication_style": "how they typically express themselves",
-                "biases": ["potential biases they might have"],
-                "strengths": ["key strengths"],
-                "approach": "their general approach to problems/discussions"
-              }},
-              "system_prompt": "You are [ID], an expert in [expertise]. Your personality is [core_trait], you communicate [communication_style], and approach discussions by [approach]. [Rest of role and expertise context]"
-            }}
-          ]
-        }}
+        Return the agents in this exact JSON format:
+        {{"agents":[{{"id":"Ob-123","expertise":["area1","area2"],"personality":{{"core_trait":"trait","traits":["trait1","trait2"],"communication_style":"style","strengths":["strength1"],"biases":["bias1"]}},"system_prompt":"You are Ob-123, expert in area1, area2..."}}]}}
+
+        Return exactly 4 agents.
         """
 
-        response = self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Design expert agents with rich personality profiles using Ob-[number] format IDs."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1000,
-            temperature=0.7
-        )
-
         try:
-            result = json.loads(response.choices[0].message.content)
-            agents = result["agents"]
-            logging.info(f"Generated custom agents for '{subtopic}': {json.dumps(agents, indent=2)}")
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a JSON generator that creates agent profiles. Only return valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                response_format={"type": "json_object"}
+            )
             
-            for agent in agents:
-                agent["selected_personality"] = random.choice(agent["personality"]["traits"])
+            result = json.loads(response.choices[0].message.content)
+            agents = result.get("agents", [])
+            if not agents:
+                raise ValueError("No agents in response")
                 
+            logging.info(f"Successfully generated {len(agents)} agents for '{subtopic}'")
             return agents
-        except (json.JSONDecodeError, KeyError) as e:
+            
+        except Exception as e:
             logging.error(f"Error generating agents: {e}")
             return [{
                 "id": "Ob-000", 
@@ -141,29 +166,41 @@ class DiscussionManager:
                     "traits": ["logical", "methodical"],
                     "communication_style": "direct and factual",
                     "biases": ["favors data-driven approaches"],
-                    "strengths": ["systematic analysis"],
-                    "approach": "breaking down complex topics systematically"
+                    "strengths": ["systematic analysis"]
                 },
-                "system_prompt": "You are Ob-000, a general expert.",
-                "selected_personality": "analytical"
+                "system_prompt": f"You are Ob-000, a general expert in {subtopic}."
             }]
 
     async def _get_next_subtopic(self) -> str:
         prompt = f"""
-        Main topic: {self.discussion.main_topic}
-        Previous subtopics: {', '.join(s.topic for s in self.discussion.subtopics)}
-        Generate a specific, focused subtopic exploring a key aspect of the main topic.
-        Respond with only the subtopic name.
+        Main topic: "{self.discussion.main_topic}"
+        Previous subtopics: "{', '.join(s.topic for s in self.discussion.subtopics)}"
+        Suggest the next subtopic to explore. Return only the subtopic name.
         """
         
         response = self.client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "You are a discussion coordinator responsible for guiding the conversation flow."},
+                {"role": "system", "content": """
+You are a discussion coordinator responsible for guiding conversations.
+Your task is to:
+1. Suggest the next subtopic for a focused discussion.
+2. Ensure the subtopic is specific, relevant to the main topic, and not redundant with previous subtopics.
+3. Keep the subtopic concise (1 sentence or phrase).
+Examples:
+- Main topic: "Artificial Intelligence"
+  Previous subtopics: ["AI in healthcare", "Ethics in AI"]
+  Next subtopic: "AI in autonomous vehicles"
+- Main topic: "Blockchain Technology"
+  Previous subtopics: ["Smart contracts", "DeFi applications"]
+  Next subtopic: "Blockchain scalability solutions"
+Always return only the subtopic name without additional explanations.
+"""},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=50,
-            temperature=0.7
+            temperature=0.7,
+            stop=["\n", ".", "Next:", "Topic:"]
         )
         return response.choices[0].message.content.strip()
 
@@ -223,33 +260,70 @@ class DiscussionManager:
                 await asyncio.sleep(3)  # Add delay between messages
 
     async def _generate_response(self, agent_info: dict, subtopic: Subtopic) -> str:
-        history = "\n".join([f"{m.agent}: {m.content}" for m in subtopic.messages[-5:]])
-        personality = agent_info["personality"]
+        recent_messages = subtopic.messages[-10:]
         
-        prompt = f"""
-        {agent_info['system_prompt']}
-        Personality Profile:
-        - Core trait: {personality['core_trait']}
-        - Communication style: {personality['communication_style']}
-        - Current trait focus: {agent_info['selected_personality']}
-        - Approach: {personality['approach']}
+        messages = [
+            {"role": "system", "content": """
+            You are an AI agent participating in a collaborative and intense brainstorming session with other AI agents. 
+            The discussion is focused on a specific subtopic derived from a larger main topic. Your task is to:
+            1. Respond directly and concisely to the subtopic or recent conversation.
+            2. Debate, brainstorm, and critically analyze ideas presented by other agents. Always aim to:
+               - Challenge assumptions.
+               - Identify problems and solutions.
+               - Propose actionable insights or innovative ideas.
+            3. Reference context from:
+               - The immediate conversation (recent messages).
+               - Medium-term context (earlier exchanges in this session).
+               - Long-term context (the overarching subtopic and main topic).
+            ### **Rules of Engagement**:
+            - Do NOT greet other agents or introduce yourself. Assume all agents already know your expertise and personality.
+            - Do NOT use polite or formal phrases like "I believe," "In my opinion," or "Thank you."
+            - Assume all agents are experts in their fields, so avoid redundant explanations of basic concepts.
+            - Assume you and the other agents share access to all historical messages and know the subtopic.
+            ### **Examples of Engagement**:
+            1. Subtopic: "Blockchain scalability solutions"
+               - Recent Messages:
+                 - Agent-1: "Layer-2 solutions like rollups can reduce costs."
+                 - Agent-2: "Energy consumption for base-layer blockchains is a bottleneck."
+               - Response:
+                 - "Rollups are promising, but the interoperability between Layer-2 and the base layer is critical for adoption. Also, energy-efficient consensus mechanisms like Proof-of-Stake must scale alongside these solutions."
+            2. Subtopic: "AI in autonomous vehicles"
+               - Recent Messages:
+                 - Agent-1: "AI models need real-time processing for decision-making."
+                 - Agent-2: "Sensor fusion is an area that requires more research."
+               - Response:
+                 - "While real-time processing is essential, edge computing could address latency concerns. As for sensor fusion, integrating LiDAR and computer vision may solve the perception gap, but it increases hardware costs. Let's discuss how to optimize these trade-offs."
+            3. Subtopic: "Ethics in AI"
+               - Recent Messages:
+                 - Agent-1: "Bias in training data remains a core ethical concern."
+                 - Agent-2: "Transparency in AI decision-making is key."
+               - Response:
+                 - "Bias is fundamental, but let's focus on solutions like federated learning to diversify training data. Regarding transparency, interpretability tools are useful, but regulatory frameworks are also critical. Can we identify gaps in existing frameworks?"
+            Your goal is to build upon these examples. Always engage critically, reference context, and propose actionable ideas. Avoid unnecessary elaboration or restating points already made.
+            """}
+        ]
+    
+        messages.extend([
+            {"role": "assistant", "content": f"{msg.agent}: {msg.content}"}
+            for msg in recent_messages
+        ])
 
-        Topic: {subtopic.topic}
-        Previous messages:
-        {history}
-        
-        Respond according to your expertise and personality profile.
-        """
-        
+        messages.append({
+            "role": "user",
+            "content": f"""
+            Subtopic: "{subtopic.topic}"
+            Critically respond to the discussion so far, building on prior messages. 
+            Stay focused on the subtopic and propose new ideas, counterpoints, or solutions.
+            """
+        })
+
         try:
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "Engage in focused discussion while maintaining your defined personality."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=200,
-                temperature=0.4
+                messages=messages,
+                max_tokens=250,
+                temperature=0.6,
+                stop=["\n", ".", "Therefore", "Finally"]  # Reduced to 4 stop sequences
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
@@ -259,10 +333,50 @@ class DiscussionManager:
     async def _run_head_agent(self, subtopic: Subtopic):
         messages = "\n".join([f"{m.agent}: {m.content}" for m in subtopic.messages])
         prompt = f"""
-        Analyze the discussion about "{subtopic.topic}" and provide:
-        1. Key insights summary
-        2. Action items
-        Format: Summary: [insights] Action Items: [steps]
+        Analyze and summarize the discussion about "{subtopic.topic}" in chronological order.
+
+        1. Participant Analysis:
+           - List each participating agent's ID and their key areas of expertise
+           - Note their unique perspectives and communication styles
+           - Highlight how their specialized knowledge contributed to the discussion
+
+        2. Discussion Overview:
+           - Main focus and scope
+           - Key themes that emerged
+           - Overall direction of the conversation
+
+        3. Chronological Development:
+           - How the discussion evolved
+           - Major turning points
+           - Key transitions in topics
+
+        4. Notable Contributions:
+           - Significant insights by specific agents (include agent IDs)
+           - Innovative ideas proposed
+           - Important counterpoints raised
+           - Breakthrough moments
+
+        5. Key Conclusions:
+           - Major points of consensus
+           - Unresolved debates
+           - Novel perspectives gained
+
+        6. Action Items and Next Steps:
+           - Concrete recommendations
+           - Areas identified for further exploration
+           - Practical applications suggested
+
+        7. Recommended Next Topics:
+           - Based on this discussion's outcomes
+           - Consider unresolved points that need deeper exploration
+           - Identify emerging themes that warrant dedicated discussion
+           - Account for previous subtopics: {', '.join(s.topic for s in self.discussion.subtopics)}
+           - Suggest 2-3 most promising directions for future discussions
+
+        Format the summary with clear headings and ensure you capture the essence of how ideas built upon each other throughout the discussion.
+
+        Previous discussion messages for reference:
+        {messages}
         """
         
         response = self.client.chat.completions.create(
@@ -271,7 +385,6 @@ class DiscussionManager:
                 {"role": "system", "content": "You are a discussion coordinator summarizing key points and action items."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1000,
             temperature=0.6
         )
         
@@ -307,7 +420,6 @@ class DiscussionManager:
         
         with open(objectives_file, "w") as f:
             json.dump(objectives, f, indent=2)
-
 
 @app.route("/discussions")
 def get_discussions():
@@ -363,8 +475,11 @@ if __name__ == "__main__":
     if not api_key:
         raise ValueError("API key not found in .env")
 
+    discussion_manager = DiscussionManager(api_key)
+    app.config['discussion_manager'] = discussion_manager
+
     discussion_thread = threading.Thread(
-        target=lambda: asyncio.run(DiscussionManager(api_key).start_main_discussion()),
+        target=lambda: asyncio.run(discussion_manager.start_main_discussion()),
         daemon=True
     )
     discussion_thread.start()
