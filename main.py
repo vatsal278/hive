@@ -73,7 +73,7 @@ class DiscussionManager:
             self.discussion = Discussion(main_topic=main_topic, subtopics=[], current_subtopic_id=None)
             
             start_time = time.time()
-            time_limit = 50  # 2 hours in seconds
+            time_limit = 7200  # 2 hours in seconds
             is_in_discussion = False
             
             while True:
@@ -113,7 +113,7 @@ class DiscussionManager:
         """
 
         response = self.client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Design expert agents with rich personality profiles using Ob-[number] format IDs."},
                 {"role": "user", "content": prompt}
@@ -157,7 +157,7 @@ class DiscussionManager:
         """
         
         response = self.client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a discussion coordinator responsible for guiding the conversation flow."},
                 {"role": "user", "content": prompt}
@@ -204,7 +204,7 @@ class DiscussionManager:
         self._save_discussion()
 
     async def _run_agent_discussion(self, subtopic: Subtopic, custom_agents: List[dict]):
-        for _ in range(2):  # Number of discussion rounds
+        for _ in range(10):  # Number of discussion rounds
             for agent_info in custom_agents:
                 response = await self._generate_response(agent_info, subtopic)
                 
@@ -220,7 +220,7 @@ class DiscussionManager:
                     "message": asdict(message),
                     "history": [asdict(msg) for msg in subtopic.messages]
                 })
-                await asyncio.sleep(1)  # Add delay between messages
+                await asyncio.sleep(3)  # Add delay between messages
 
     async def _generate_response(self, agent_info: dict, subtopic: Subtopic) -> str:
         history = "\n".join([f"{m.agent}: {m.content}" for m in subtopic.messages[-5:]])
@@ -243,13 +243,13 @@ class DiscussionManager:
         
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "Engage in focused discussion while maintaining your defined personality."},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=150,
-                temperature=0.7
+                max_tokens=200,
+                temperature=0.4
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
@@ -271,7 +271,8 @@ class DiscussionManager:
                 {"role": "system", "content": "You are a discussion coordinator summarizing key points and action items."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=200
+            max_tokens=1000,
+            temperature=0.6
         )
         
         summary = response.choices[0].message.content.strip()
