@@ -113,7 +113,7 @@ class DiscussionManager:
         """
 
         response = self.client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Design expert agents with rich personality profiles using Ob-[number] format IDs."},
                 {"role": "user", "content": prompt}
@@ -266,7 +266,7 @@ class DiscussionManager:
         """
         
         response = self.client.chat.completions.create(
-            model="gpt-4",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a discussion coordinator summarizing key points and action items."},
                 {"role": "user", "content": prompt}
