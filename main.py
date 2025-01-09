@@ -122,7 +122,7 @@ class DiscussionManager:
         self.is_processing = False
         self.topics = []
         self.current_round = 0
-        self.total_rounds = 15
+        self.total_rounds = 2
         self.load_topics_from_env()
 
     def load_topics_from_env(self):
@@ -319,13 +319,6 @@ class DiscussionManager:
         - Bring in novel examples and analogies
         - Connect ideas in unexpected but relevant ways
         - Avoid simply agreeing or disagreeing - add new dimensions
-
-        Response Structure:
-        - Start with a clear position or analytical point
-        - Develop your main argument in 1-2 supporting sentences
-        - End with a strong concluding thought that wraps up your point
-        - Never end with an incomplete thought or trailing idea
-        - Aim for 100-150 words total
         
 Response Guidelines for Agent References:
         - Reference other agents naturally and selectively:
@@ -423,6 +416,7 @@ Response Guidelines for Agent References:
             6. Questioning: Ask if critical information is missing
             
             Remember:
+            - Not to Respond in more than 100-200 words
             - References should feel natural, not forced
             - Vary between direct references, implicit references, and independent statements
             - Focus on advancing the {PHASE_DISTRIBUTION[current_phase]['purpose']} objective
@@ -430,24 +424,15 @@ Response Guidelines for Agent References:
             
             messages.append({"role": "user", "content": assistant_prompt})
 
-            # Validate and clamp parameters to safe maximum values
-            def clamp(value, min_val, max_val):
-                return max(min_val, min(max_val, value))
-                
-            # Configure parameters for maximum diversity while maintaining coherence
-            temperature = clamp(1.1, 0.7, 1.2)      # Max practical value while maintaining coherence
-            top_p = clamp(0.95, 0.7, 0.95)         # Maximum practical value for nucleus sampling
-            freq_penalty = clamp(1.8, 0.8, 1.8)     # Maximum before forcing artificial variety
-            pres_penalty = clamp(1.7, 0.8, 1.8)     # High value while maintaining topic focus
-            
+            # Configure parameters for diverse and unique responses
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
-                max_tokens=200,
-                temperature=temperature,      # High creativity while maintaining coherence
-                top_p=top_p,                 # Maximum practical diversity
-                frequency_penalty=freq_penalty,  # Maximum practical repetition avoidance
-                presence_penalty=pres_penalty    # High topic exploration while staying focused
+                max_tokens=300,
+                temperature=0.95,    # Higher temperature for more creative responses
+                top_p=0.9,          # Allow more diverse token selection
+                frequency_penalty=1.8,  # Strongly discourage repetition of ideas
+                presence_penalty=1.6    # Encourage coverage of new topics
             )
             
             return response.choices[0].message.content.strip()
