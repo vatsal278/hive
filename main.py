@@ -315,7 +315,12 @@ class DiscussionManager:
         {chr(10).join(f"- {aid} ({prof['disc_type']} type, Expert in: {', '.join(prof['expertise'])})" for aid, prof in agent_profiles.items() if aid != agent_info['id'])}
 
         Response Guidelines:
-        - Vary your response style based on context:
+        Important:
+        - NEVER introduce yourself or your role - others already know who you are
+        - Do NOT say phrases like "As a [type] expert" or "From my perspective as..."
+        - Jump directly into your contribution without preamble
+        
+        Vary your response style based on context:
             * Build on others' points with supporting evidence
             * Challenge perspectives with constructive counterpoints
             * Share insights from your expertise
@@ -323,10 +328,18 @@ class DiscussionManager:
             * Ask questions only when truly needed
             * Make decisive statements or recommendations
             * Offer analytical observations
+        
         - Reference other agents by their ID when responding
         - Keep responses concise (2-3 sentences)
         - End responses naturally - don't force questions
         - Maintain professional and engaging tone
+
+        Avoid:
+        - "As an expert in..."
+        - "From my perspective..."
+        - "Given my background..."
+        - "In my role as..."
+        - Any other forms of self-introduction
         
         Current Phase: {current_phase}
         Phase Purpose: {PHASE_DISTRIBUTION[current_phase]['purpose']}
