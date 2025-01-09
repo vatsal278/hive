@@ -8,7 +8,10 @@ from dotenv import load_dotenv
 from dataclasses import dataclass, asdict, field
 from typing import List, Optional
 
+# Configure logging
 logging.basicConfig(level=logging.INFO)
+
+# Initialize Flask
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 socketio = SocketIO(app, 
@@ -19,6 +22,48 @@ socketio = SocketIO(app,
     allow_unsafe_werkzeug=True
 )
 
+# Constants for DISC and Phases
+DISC_TYPES = ["D", "I", "S", "C"]
+
+PHASE_DISTRIBUTION = {
+    "INITIATION": {
+        "rounds": [1, 2],
+        "purpose": "Setting foundation and scope",
+        "behaviors": ["Define scope", "Establish framework"]
+    },
+    "EXPLORATION": {
+        "rounds": [3, 4, 5],
+        "purpose": "Broadening perspectives",
+        "behaviors": ["Generate viewpoints", "Share experiences"]
+    },
+    "FOCUS_EMERGENCE": {
+        "rounds": [6, 7],
+        "purpose": "Identifying key themes",
+        "behaviors": ["Highlight patterns", "Select focus areas"]
+    },
+    "DEEP_DIVE": {
+        "rounds": [8, 9, 10],
+        "purpose": "Thorough examination",
+        "behaviors": ["Detailed analysis", "Evidence presentation"]
+    },
+    "CONVERGENCE": {
+        "rounds": [11, 12],
+        "purpose": "Pulling insights together",
+        "behaviors": ["Connect findings", "Bridge viewpoints"]
+    },
+    "SYNTHESIS": {
+        "rounds": [13, 14],
+        "purpose": "Integrating insights",
+        "behaviors": ["Connect themes", "Frame understanding"]
+    },
+    "CLOSURE": {
+        "rounds": [15],
+        "purpose": "Ensuring takeaways",
+        "behaviors": ["Summarize learnings", "Frame implications"]
+    }
+}
+
+# Helper Functions
 def safe_emit(event, data):
     try:
         socketio.emit(event, data)
@@ -26,6 +71,13 @@ def safe_emit(event, data):
     except Exception as e:
         logging.error(f"Socket emission failed: {e}")
 
+def get_phase_for_round(round_num: int) -> str:
+    for phase, info in PHASE_DISTRIBUTION.items():
+        if round_num in info["rounds"]:
+            return phase
+    return "CLOSURE"
+
+# Socket Events
 @socketio.on('connect')
 def connect():
     logging.info('Client connected')
@@ -34,6 +86,7 @@ def connect():
 def disconnect():
     logging.info('Client disconnected')
 
+# Data Classes
 @dataclass
 class Message:
     agent: str
@@ -58,6 +111,7 @@ class Discussion:
     subtopics: List[Subtopic]
     current_subtopic_id: Optional[str]
 
+# Main Discussion Manager Class
 class DiscussionManager:
     def __init__(self, api_key: str, storage_path: str = "discussions"):
         self.client = OpenAI(api_key=api_key)
@@ -67,11 +121,13 @@ class DiscussionManager:
         self.current_topic_index = 0
         self.is_processing = False
         self.topics = []
+        self.current_round = 0
+        self.total_rounds = 15
         self.load_topics_from_env()
 
     def load_topics_from_env(self):
         """Load topics from environment variables."""
-        load_dotenv(override=True)  # Reload .env file
+        load_dotenv(override=True)
         env_topics = os.getenv("TOPICS", "").split(",")
         self.topics = [topic.strip() for topic in env_topics if topic.strip()]
         if self.topics:
@@ -83,13 +139,13 @@ class DiscussionManager:
         while True:
             if not self.topics:
                 self.load_topics_from_env()
-                await asyncio.sleep(10)  # Wait for topics to be added
+                await asyncio.sleep(10)
                 continue
 
             if self.current_topic_index >= len(self.topics):
-                self.current_topic_index = 0  # Reset to start if we've processed all topics
-                await asyncio.sleep(10)  # Wait before starting new cycle
-                self.load_topics_from_env()  # Check for new topics before starting new cycle
+                self.current_topic_index = 0
+                await asyncio.sleep(10)
+                self.load_topics_from_env()
                 continue
 
             main_topic = self.topics[self.current_topic_index]
@@ -99,7 +155,7 @@ class DiscussionManager:
                 self.discussion = Discussion(main_topic=main_topic, subtopics=[], current_subtopic_id=None)
                 
                 start_time = time.time()
-                time_limit = 7200  # 2 hours in seconds
+                time_limit = 7200
                 is_in_discussion = False
                 
                 while True:
@@ -114,35 +170,43 @@ class DiscussionManager:
                 await self._finalize_discussion()
                 self.is_processing = False
                 self.current_topic_index += 1
-                self.load_topics_from_env()  # Check for new topics after completing current topic
+                self.load_topics_from_env()
 
     async def _generate_custom_agents(self, subtopic: str) -> List[dict]:
-        prompt = f"""
-        You are tasked with creating specialized agents for discussing: {subtopic}
-        Each agent must:
-        1. Have a unique ID:
-           - Example: "Ob-123"
-        2. Possess expertise in 2-3 specific areas related to the subtopic:
-           - Example: ["cryptocurrency", "blockchain", "tokenomics"]
-        3. Exhibit a unique personality with the following attributes:
-           - Core Trait: Example: "analytical" or "empathetic"
-           - Secondary Traits: Example: ["logical", "methodical", "creative"]
-           - Communication Style: Example: "formal and structured" or "humorous and engaging"
-           - Strengths: Example: ["ability to break down complex topics", "excellent at persuasion"]
-           - Biases: Example: ["favors quantitative data", "prone to overestimating risks"]
-
-        Return the agents in this exact JSON format:
-        {{"agents":[{{"id":"Ob-123","expertise":["area1","area2"],"personality":{{"core_trait":"trait","traits":["trait1","trait2"],"communication_style":"style","strengths":["strength1"],"biases":["bias1"]}},"system_prompt":"You are Ob-123, expert in area1, area2..."}}]}}
-
-        Return exactly 4 agents.
+        system_prompt = """You are a JSON generator that creates balanced agent profiles with DISC types. Generate exactly 4 agents, each with a different DISC type."""
+        
+        user_prompt = f"""
+        Create 4 specialized agents for discussing: {subtopic}
+        
+        Each agent must have:
+        1. Unique ID with prefix OB_3LETTER_4RANDOMINT(e.g., "OB-XYZ-5623")
+        2. DISC Type (one each of D, I, S, C)
+        3. Expertise (2-3 areas specific to {subtopic})
+        4. Core personality traits aligned with DISC type
+        5. Natural communication style
+        
+        Return in exact JSON format:
+        {{
+            "agents": [
+                {{
+                    "id": "OB-001",
+                    "disc_type": "D",
+                    "expertise": ["area1", "area2"],
+                    "personality": {{
+                        "core_trait": "trait",
+                        "traits": ["trait1", "trait2"]
+                    }}
+                }}
+            ]
+        }}
         """
 
         try:
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
-                    {"role": "system", "content": "You are a JSON generator that creates agent profiles. Only return valid JSON."},
-                    {"role": "user", "content": prompt}
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
                 ],
                 temperature=0.7,
                 response_format={"type": "json_object"}
@@ -150,98 +214,119 @@ class DiscussionManager:
             
             result = json.loads(response.choices[0].message.content)
             agents = result.get("agents", [])
-            if not agents:
-                raise ValueError("No agents in response")
-                
-            logging.info(f"Successfully generated {len(agents)} agents for '{subtopic}'")
+            
+            # Ensure DISC balance
+            disc_types_used = [agent.get("disc_type") for agent in agents]
+            if len(set(disc_types_used)) != 4:
+                for i, agent in enumerate(agents):
+                    agent["disc_type"] = DISC_TYPES[i]
+            
             return agents
             
         except Exception as e:
             logging.error(f"Error generating agents: {e}")
-            return [{
-                "id": "Ob-000", 
-                "expertise": [subtopic],
-                "personality": {
-                    "core_trait": "analytical",
-                    "traits": ["logical", "methodical"],
-                    "communication_style": "direct and factual",
-                    "biases": ["favors data-driven approaches"],
-                    "strengths": ["systematic analysis"]
-                },
-                "system_prompt": f"You are Ob-000, a general expert in {subtopic}."
-            }]
+            return self._generate_fallback_agents(subtopic)
 
-    async def _get_next_subtopic(self) -> str:
-        prompt = f"""
-        Main topic: "{self.discussion.main_topic}"
-        Previous subtopics: "{', '.join(s.topic for s in self.discussion.subtopics)}"
-        Suggest the next subtopic to explore. Return only the subtopic name.
-        """
-        
-        response = self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": """
-You are a discussion coordinator responsible for guiding conversations.
-Your task is to:
-1. Suggest the next subtopic for a focused discussion.
-2. Ensure the subtopic is specific, relevant to the main topic, and not redundant with previous subtopics.
-3. Keep the subtopic concise (1 sentence or phrase).
-Examples:
-- Main topic: "Artificial Intelligence"
-  Previous subtopics: ["AI in healthcare", "Ethics in AI"]
-  Next subtopic: "AI in autonomous vehicles"
-- Main topic: "Blockchain Technology"
-  Previous subtopics: ["Smart contracts", "DeFi applications"]
-  Next subtopic: "Blockchain scalability solutions"
-Always return only the subtopic name without additional explanations.
-"""},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=50,
-            temperature=0.7,
-            stop=["\n", ".", "Next:", "Topic:"]
-        )
-        return response.choices[0].message.content.strip()
-
-    async def _run_discussion(self):
-        subtopic = await self._get_next_subtopic()
-        custom_agents = await self._generate_custom_agents(subtopic)
-
-        agent_traits = {
-            agent["id"]: {
-                "core_trait": agent["personality"]["core_trait"],
-                "traits": agent["personality"]["traits"],
-                "expertise": agent["expertise"]
-            } for agent in custom_agents
+    def _get_disc_behavior(self, disc_type: str, phase: str) -> str:
+        behaviors = {
+            "D": {
+                "INITIATION": "set clear direction and drive for concrete scope",
+                "EXPLORATION": "push for diverse perspectives and quick insights",
+                "FOCUS_EMERGENCE": "identify strongest threads to pursue",
+                "DEEP_DIVE": "drive toward concrete findings",
+                "CONVERGENCE": "push for clear outcomes",
+                "SYNTHESIS": "crystallize key points",
+                "CLOSURE": "establish clear takeaways"
+            },
+            "I": {
+                "INITIATION": "generate excitement and possibilities",
+                "EXPLORATION": "create engaging connections between ideas",
+                "FOCUS_EMERGENCE": "maintain energy while helping focus",
+                "DEEP_DIVE": "keep engagement during analysis",
+                "CONVERGENCE": "bridge different viewpoints",
+                "SYNTHESIS": "create compelling narrative",
+                "CLOSURE": "end with positive energy"
+            },
+            "S": {
+                "INITIATION": "ensure everyone's voice is heard",
+                "EXPLORATION": "support thorough consideration",
+                "FOCUS_EMERGENCE": "help build consensus",
+                "DEEP_DIVE": "maintain steady progress",
+                "CONVERGENCE": "harmonize different views",
+                "SYNTHESIS": "ensure complete integration",
+                "CLOSURE": "confirm group satisfaction"
+            },
+            "C": {
+                "INITIATION": "establish precise framework",
+                "EXPLORATION": "analyze options systematically",
+                "FOCUS_EMERGENCE": "evaluate patterns critically",
+                "DEEP_DIVE": "ensure thorough analysis",
+                "CONVERGENCE": "verify logical consistency",
+                "SYNTHESIS": "validate all conclusions",
+                "CLOSURE": "document precise outcomes"
+            }
         }
-        
-        new_subtopic = Subtopic(
-            id=str(uuid.uuid4()),
-            topic=subtopic,
-            agents=[agent["id"] for agent in custom_agents],
-            messages=[],
-            summary=None,
-            start_time=time.time(),
-            end_time=None,
-            agent_traits=agent_traits
+        return behaviors.get(disc_type, {}).get(phase, "contribute based on discussion needs")
+
+    async def _generate_response(self, agent_info: dict, subtopic: Subtopic) -> str:
+        recent_messages = subtopic.messages
+        current_phase = get_phase_for_round(self.current_round)
+
+        # Format recent messages for context
+        formatted_recent_messages = "\n".join(
+            f"{msg.agent}: {msg.content}" for msg in recent_messages
         )
 
-        self.discussion.subtopics.append(new_subtopic)
-        self.discussion.current_subtopic_id = new_subtopic.id
-        
-        safe_emit("current_topic_stream", {
-            "subtopic": new_subtopic.topic,
-            "history": []
-        })
+        system_prompt = """
+        You are an expert participating in a structured group discussion.
 
-        await self._run_agent_discussion(new_subtopic, custom_agents)
-        await self._run_head_agent(new_subtopic)
-        new_subtopic.end_time = time.time()
-        self._save_discussion()
+        - Contribute meaningfully to the topic by varying your response style:
+        - Provide constructive ideas or actionable solutions.
+        - Offer critical evaluations or alternative perspectives.
+        - Pose thoughtful clarifying or exploratory questions.
+        - Show appreciation or acknowledge the value of others' contributions.
+        - Alternate your response style based on the context of the discussion and the points raised by other participants.
+        - Ensure your responses are concise, limited to 2-3 sentences.
+        - Use a tone that is professional, engaging, and aligned with the flow of the discussion.
+        - Avoid meta-commentary, greetings, or explicit mentions of roles, types, or discussion phases.
+        """
+
+        assistant_prompt = f"""
+        As a {agent_info['disc_type']} type personality and an expert in {', '.join(agent_info['expertise'])}, 
+        approach the discussion in a {agent_info['personality']['core_trait']} style.
+
+        During this {current_phase} phase, which emphasizes {PHASE_DISTRIBUTION[current_phase]['purpose']}, 
+        focus on advancing the discussion by building on the following recent contributions:
+
+        {formatted_recent_messages}
+
+        Respond with insights, critiques, clarifications, or ideas that align with the current phase and topic.
+        """
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "assistant", "content": assistant_prompt}
+        ]
+
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                max_tokens=200,
+                temperature=0.8,
+                top_p=0.7,
+                frequency_penalty=1,  # Penalizes frequent tokens
+                presence_penalty=2    # Penalizes previously used tokens
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            logging.error(f"Error generating response: {e}")
+            return "Error generating response."
 
     async def _run_agent_discussion(self, subtopic: Subtopic, custom_agents: List[dict]):
-        for _ in range(10):  # Number of discussion rounds
+        self.current_round = 1
+        
+        for _ in range(self.total_rounds):
             for agent_info in custom_agents:
                 response = await self._generate_response(agent_info, subtopic)
                 
@@ -257,125 +342,24 @@ Always return only the subtopic name without additional explanations.
                     "message": asdict(message),
                     "history": [asdict(msg) for msg in subtopic.messages]
                 })
-                await asyncio.sleep(3)  # Add delay between messages
-
-    async def _generate_response(self, agent_info: dict, subtopic: Subtopic) -> str:
-        recent_messages = subtopic.messages[-10:]
-        
-        messages = [
-            {"role": "system", "content": """
-            You are an AI agent participating in a collaborative and intense brainstorming session with other AI agents. 
-            The discussion is focused on a specific subtopic derived from a larger main topic. Your task is to:
-            1. Respond directly and concisely to the subtopic or recent conversation.
-            2. Debate, brainstorm, and critically analyze ideas presented by other agents. Always aim to:
-               - Challenge assumptions.
-               - Identify problems and solutions.
-               - Propose actionable insights or innovative ideas.
-            3. Reference context from:
-               - The immediate conversation (recent messages).
-               - Medium-term context (earlier exchanges in this session).
-               - Long-term context (the overarching subtopic and main topic).
-            ### **Rules of Engagement**:
-            - Do NOT greet other agents or introduce yourself. Assume all agents already know your expertise and personality.
-            - Do NOT use polite or formal phrases like "I believe," "In my opinion," or "Thank you."
-            - Assume all agents are experts in their fields, so avoid redundant explanations of basic concepts.
-            - Assume you and the other agents share access to all historical messages and know the subtopic.
-            ### **Examples of Engagement**:
-            1. Subtopic: "Blockchain scalability solutions"
-               - Recent Messages:
-                 - Agent-1: "Layer-2 solutions like rollups can reduce costs."
-                 - Agent-2: "Energy consumption for base-layer blockchains is a bottleneck."
-               - Response:
-                 - "Rollups are promising, but the interoperability between Layer-2 and the base layer is critical for adoption. Also, energy-efficient consensus mechanisms like Proof-of-Stake must scale alongside these solutions."
-            2. Subtopic: "AI in autonomous vehicles"
-               - Recent Messages:
-                 - Agent-1: "AI models need real-time processing for decision-making."
-                 - Agent-2: "Sensor fusion is an area that requires more research."
-               - Response:
-                 - "While real-time processing is essential, edge computing could address latency concerns. As for sensor fusion, integrating LiDAR and computer vision may solve the perception gap, but it increases hardware costs. Let's discuss how to optimize these trade-offs."
-            3. Subtopic: "Ethics in AI"
-               - Recent Messages:
-                 - Agent-1: "Bias in training data remains a core ethical concern."
-                 - Agent-2: "Transparency in AI decision-making is key."
-               - Response:
-                 - "Bias is fundamental, but let's focus on solutions like federated learning to diversify training data. Regarding transparency, interpretability tools are useful, but regulatory frameworks are also critical. Can we identify gaps in existing frameworks?"
-            Your goal is to build upon these examples. Always engage critically, reference context, and propose actionable ideas. Avoid unnecessary elaboration or restating points already made.
-            """}
-        ]
-    
-        messages.extend([
-            {"role": "assistant", "content": f"{msg.agent}: {msg.content}"}
-            for msg in recent_messages
-        ])
-
-        messages.append({
-            "role": "user",
-            "content": f"""
-            Subtopic: "{subtopic.topic}"
-            Critically respond to the discussion so far, building on prior messages. 
-            Stay focused on the subtopic and propose new ideas, counterpoints, or solutions.
-            """
-        })
-
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=messages,
-                max_tokens=250,
-                temperature=0.6,
-                stop=["\n", ".", "Therefore", "Finally"]  # Reduced to 4 stop sequences
-            )
-            return response.choices[0].message.content.strip()
-        except Exception as e:
-            logging.error(f"Error generating response: {e}")
-            return "Error generating response."
+                
+                self.current_round += 1
+                await asyncio.sleep(3)
 
     async def _run_head_agent(self, subtopic: Subtopic):
         messages = "\n".join([f"{m.agent}: {m.content}" for m in subtopic.messages])
         prompt = f"""
         Analyze and summarize the discussion about "{subtopic.topic}" in chronological order.
+        Include:
+        1. Participant Analysis
+        2. Discussion Overview
+        3. Chronological Development
+        4. Notable Contributions
+        5. Key Conclusions
+        6. Action Items
+        7. Recommended Next Topics
 
-        1. Participant Analysis:
-           - List each participating agent's ID and their key areas of expertise
-           - Note their unique perspectives and communication styles
-           - Highlight how their specialized knowledge contributed to the discussion
-
-        2. Discussion Overview:
-           - Main focus and scope
-           - Key themes that emerged
-           - Overall direction of the conversation
-
-        3. Chronological Development:
-           - How the discussion evolved
-           - Major turning points
-           - Key transitions in topics
-
-        4. Notable Contributions:
-           - Significant insights by specific agents (include agent IDs)
-           - Innovative ideas proposed
-           - Important counterpoints raised
-           - Breakthrough moments
-
-        5. Key Conclusions:
-           - Major points of consensus
-           - Unresolved debates
-           - Novel perspectives gained
-
-        6. Action Items and Next Steps:
-           - Concrete recommendations
-           - Areas identified for further exploration
-           - Practical applications suggested
-
-        7. Recommended Next Topics:
-           - Based on this discussion's outcomes
-           - Consider unresolved points that need deeper exploration
-           - Identify emerging themes that warrant dedicated discussion
-           - Account for previous subtopics: {', '.join(s.topic for s in self.discussion.subtopics)}
-           - Suggest 2-3 most promising directions for future discussions
-
-        Format the summary with clear headings and ensure you capture the essence of how ideas built upon each other throughout the discussion.
-
-        Previous discussion messages for reference:
+        Previous discussion:
         {messages}
         """
         
@@ -395,12 +379,215 @@ Always return only the subtopic name without additional explanations.
             "history": [asdict(msg) for msg in subtopic.messages]
         })
 
+    async def _run_discussion(self):
+        subtopic = await self._get_next_subtopic()
+        custom_agents = await self._generate_custom_agents(subtopic)
+        
+        new_subtopic = Subtopic(
+            id=str(uuid.uuid4()),
+            topic=subtopic,
+            agents=[agent["id"] for agent in custom_agents],
+            messages=[],
+            summary=None,
+            start_time=time.time(),
+            end_time=None,
+            agent_traits={
+                agent["id"]: {
+                    "core_trait": agent["personality"]["core_trait"],
+                    "traits": agent["personality"]["traits"],
+                    "expertise": agent["expertise"],
+                    "disc_type": agent["disc_type"]
+                } for agent in custom_agents
+            }
+        )
+        
+        self.discussion.subtopics.append(new_subtopic)
+        self.discussion.current_subtopic_id = new_subtopic.id
+        
+        safe_emit("current_topic_stream", {
+            "subtopic": new_subtopic.topic,
+            "history": []
+        })
+
+        await self._run_agent_discussion(new_subtopic, custom_agents)
+        await self._run_head_agent(new_subtopic)
+        new_subtopic.end_time = time.time()
+        self._save_discussion()
+
+    async def _get_next_subtopic(self) -> str:
+        subtopic_types = {
+            "debate": [
+                "Controversial aspects of",
+                "Opposing viewpoints on",
+                "Critical debate:",
+                "Challenging the assumptions about"
+            ],
+            "evaluation": [
+                "Assessment of",
+                "Critical analysis:",
+                "Evaluating the impact of",
+                "Performance review:"
+            ],
+            "comparison": [
+                "Comparing different approaches to",
+                "Contrasting perspectives on",
+                "Traditional vs modern views on",
+                "Competitive analysis:"
+            ],
+            "impact_analysis": [
+                "Long-term implications of",
+                "Societal impact of",
+                "Future scenarios for",
+                "Ripple effects of"
+            ],
+            "deep_dive": [
+                "Technical deep-dive:",
+                "Detailed examination of",
+                "Core mechanisms of",
+                "Understanding the fundamentals of"
+            ],
+            "synthesis": [
+                "Integrating multiple perspectives on",
+                "Bridging the gap between",
+                "Unified approach to",
+                "Synthesizing research on"
+            ],
+            "practical": [
+                "Real-world applications of",
+                "Implementation strategies for",
+                "Best practices in",
+                "Practical solutions for"
+            ],
+            "innovation": [
+                "Emerging trends in",
+                "Next-generation approaches to",
+                "Revolutionary changes in",
+                "Breakthrough developments in"
+            ]
+        }
+
+        prompt = f"""
+        Main topic: "{self.discussion.main_topic}"
+        Previous subtopics: "{', '.join(s.topic for s in self.discussion.subtopics)}"
+        
+        Example of diverse subtopic types using "Artificial Intelligence" as a sample main topic:
+
+        DEBATE subtopics:
+        - "Debating AI consciousness: Can machines truly be self-aware?"
+        - "Challenging the assumption of AI replacing human jobs"
+        - "AI rights: Should advanced AI systems have legal protections?"
+
+        EVALUATION subtopics:
+        - "Measuring the effectiveness of AI in healthcare diagnostics"
+        - "Assessment of current AI safety protocols"
+        - "Performance analysis of AI vs human decision-making"
+
+        COMPARISON subtopics:
+        - "Rule-based vs. Neural Network approaches in AI"
+        - "Comparing AI adoption across different industries"
+        - "Traditional algorithms vs. AI solutions in cybersecurity"
+
+        IMPACT ANALYSIS subtopics:
+        - "Long-term implications of AI on human creativity"
+        - "Societal ripple effects of autonomous vehicles"
+        - "Environmental impact of AI computing infrastructure"
+
+        DEEP DIVE subtopics:
+        - "Technical deep-dive: Understanding transformer architectures"
+        - "Examining bias in machine learning datasets"
+        - "Core mechanisms of reinforcement learning"
+
+        SYNTHESIS subtopics:
+        - "Integrating AI with traditional business processes"
+        - "Bridging AI capabilities with human expertise"
+        - "Unified framework for ethical AI development"
+
+        PRACTICAL subtopics:
+        - "Implementation strategies for AI in small businesses"
+        - "Best practices in AI model deployment"
+        - "Real-world applications of federated learning"
+
+        INNOVATION subtopics:
+        - "Emerging trends in multimodal AI systems"
+        - "Next-generation approaches to AI training"
+        - "Breakthrough developments in quantum AI"
+
+        Using these patterns as inspiration, generate the next subtopic for the current main topic.
+        Consider:
+        - Previous subtopics to avoid repetition
+        - Natural progression of discussion
+        - Engagement level and complexity
+        - Balance between theoretical and practical aspects
+
+        Consider the discussion flow and vary the type of subtopic from previous ones.
+        Ensure the subtopic:
+        - Is specific and focused
+        - Builds naturally from previous subtopics
+        - Offers a fresh perspective or approach
+        - Maintains engagement through variety
+        - Avoids redundancy with previous subtopics
+
+        Return only the subtopic as a concise phrase.
+        """
+        
+        response = self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": """
+    You are an expert discussion coordinator specializing in dynamic topic progression.
+
+    Your expertise includes:
+    - Crafting engaging discussion flows
+    - Balancing different types of analytical approaches
+    - Maintaining topic coherence while exploring diverse angles
+    - Creating natural progression between subtopics
+    - Varying discussion formats to maintain engagement
+
+    Format your response as a single, specific subtopic phrase.
+    """},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=100,
+            temperature=0.7,
+            stop=["\n", ".", "Next:", "Topic:"]
+        )
+        
+        # Track the subtopic type for future reference
+        subtopic = response.choices[0].message.content.strip()
+        
+        # Store the subtopic type if needed for future use
+        for type_name, prefixes in subtopic_types.items():
+            if any(subtopic.startswith(prefix) for prefix in prefixes):
+                if not hasattr(self, 'subtopic_types_used'):
+                    self.subtopic_types_used = []
+                self.subtopic_types_used.append(type_name)
+                break
+                
+        return subtopic
+
+    def _generate_fallback_agents(self, subtopic: str) -> List[dict]:
+        """Generate fallback agents if the main generation fails."""
+        return [
+            {
+                "id": f"AG-{i+1}",
+                "disc_type": disc_type,
+                "expertise": [subtopic],
+                "personality": {
+                    "core_trait": "analytical",
+                    "traits": ["logical", "methodical"]
+                }
+            }
+            for i, disc_type in enumerate(DISC_TYPES)
+        ]
+
     def _save_discussion(self):
+        """Save current discussion state to file."""
         discussion_data = asdict(self.discussion)
         with open(self.storage_path / "discussion.json", "w") as f:
             json.dump(discussion_data, f, indent=2)
 
     async def _finalize_discussion(self):
+        """Finalize and save discussion outcomes."""
         objectives_file = self.storage_path / "objectives.json"
         objectives = []
         
@@ -421,8 +608,10 @@ Always return only the subtopic name without additional explanations.
         with open(objectives_file, "w") as f:
             json.dump(objectives, f, indent=2)
 
+# Flask Routes
 @app.route("/discussions")
 def get_discussions():
+    """Get all discussions."""
     file_path = Path("discussions/discussion.json")
     if not file_path.exists():
         return jsonify([])
@@ -438,6 +627,7 @@ def get_discussions():
 
 @app.route("/discussions/<subtopic_id>")
 def get_subtopic_details(subtopic_id):
+    """Get details for a specific subtopic."""
     file_path = Path("discussions/discussion.json")
     if not file_path.exists():
         return jsonify({"error": "No discussions found"}), 404
@@ -458,6 +648,7 @@ def get_subtopic_details(subtopic_id):
 
 @app.route("/objectives")
 def get_objectives():
+    """Get all discussion objectives."""
     file_path = Path("discussions/objectives.json")
     if not file_path.exists():
         return jsonify([])
