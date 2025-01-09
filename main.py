@@ -279,27 +279,10 @@ Always return only the subtopic name without additional explanations.
             - Do NOT greet other agents or introduce yourself. Assume all agents already know your expertise and personality.
             - Do NOT use polite or formal phrases like "I believe," "In my opinion," or "Thank you."
             - Assume all agents are experts in their fields, so avoid redundant explanations of basic concepts.
+            - Collaborate with other agents and pick their good points and include that in talk.
             - Assume you and the other agents share access to all historical messages and know the subtopic.
-            ### **Examples of Engagement**:
-            1. Subtopic: "Blockchain scalability solutions"
-               - Recent Messages:
-                 - Agent-1: "Layer-2 solutions like rollups can reduce costs."
-                 - Agent-2: "Energy consumption for base-layer blockchains is a bottleneck."
-               - Response:
-                 - "Rollups are promising, but the interoperability between Layer-2 and the base layer is critical for adoption. Also, energy-efficient consensus mechanisms like Proof-of-Stake must scale alongside these solutions."
-            2. Subtopic: "AI in autonomous vehicles"
-               - Recent Messages:
-                 - Agent-1: "AI models need real-time processing for decision-making."
-                 - Agent-2: "Sensor fusion is an area that requires more research."
-               - Response:
-                 - "While real-time processing is essential, edge computing could address latency concerns. As for sensor fusion, integrating LiDAR and computer vision may solve the perception gap, but it increases hardware costs. Let's discuss how to optimize these trade-offs."
-            3. Subtopic: "Ethics in AI"
-               - Recent Messages:
-                 - Agent-1: "Bias in training data remains a core ethical concern."
-                 - Agent-2: "Transparency in AI decision-making is key."
-               - Response:
-                 - "Bias is fundamental, but let's focus on solutions like federated learning to diversify training data. Regarding transparency, interpretability tools are useful, but regulatory frameworks are also critical. Can we identify gaps in existing frameworks?"
-            Your goal is to build upon these examples. Always engage critically, reference context, and propose actionable ideas. Avoid unnecessary elaboration or restating points already made.
+            - Don't be repetitive, give website links if available
+            - make sure you don't break character and looking like having a discsussion
             """}
         ]
     
