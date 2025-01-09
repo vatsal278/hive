@@ -314,6 +314,7 @@ Always return only the subtopic name without additional explanations.
             Subtopic: "{subtopic.topic}"
             Critically respond to the discussion so far, building on prior messages. 
             Stay focused on the subtopic and propose new ideas, counterpoints, or solutions but not using more than 200 tokens and also dont mention the subtopic or topics just your true natural thoughts.
+            Occasionally include other agents from recent conversation in your response refering to them and their views.
             """
         })
 
