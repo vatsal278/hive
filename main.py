@@ -313,6 +313,7 @@ Always return only the subtopic name without additional explanations.
             "content": f"""
             Subtopic: "{subtopic.topic}"
             Critically respond to the discussion so far, building on prior messages. 
+            Respond with a single clear point or counterpoint in 2-3 sentences maximum.
             Stay focused on the subtopic and propose new ideas, counterpoints, or solutions.
             """
         })
