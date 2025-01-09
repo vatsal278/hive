@@ -391,22 +391,22 @@ Response Guidelines for Agent References:
                 if profile["last_referenced"] >= (self.current_round - 1)
                 and agent_id != agent_info['id']
             ]
-
-            # Final prompt with reference guidance
+            
             assistant_prompt = f"""
             As {agent_info['id']}, engage in the discussion considering:
-            
+
             Current State:
             - Active Questions: {json.dumps(current_questions) if current_questions else "None pending"}
             - Recent Key Points: {json.dumps(recent_key_points[-3:]) if recent_key_points else "Starting discussion"}
             - Recent Contributors: {json.dumps(recent_contributors) if recent_contributors else "None"}
-            
+
             Reference Guidelines:
             1. If responding to a specific point: Reference that agent directly
             2. If building on multiple ideas: Reference up to 2 relevant agents
             3. If making a new point: No need for references
             4. If synthesizing: Briefly acknowledge relevant contributors
-            
+            5. Avoid mentioning other agents in every response. Sometimes focus solely on your own unique thoughts and perspectives.
+
             Choose your response approach:
             1. Analytical: Evaluate previous points
             2. Supportive: Build upon others' arguments
@@ -414,13 +414,13 @@ Response Guidelines for Agent References:
             4. Synthesizing: Connect different perspectives
             5. Decisive: Make clear statements
             6. Questioning: Ask if critical information is missing
-            
+
             Remember:
-            - Not to Respond in more than 100-200 words
+            - Not to respond in more than 100-200 words
             - References should feel natural, not forced
             - Vary between direct references, implicit references, and independent statements
             - Focus on advancing the {PHASE_DISTRIBUTION[current_phase]['purpose']} objective
-            """
+            """ 
             
             messages.append({"role": "user", "content": assistant_prompt})
 
