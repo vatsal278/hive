@@ -313,7 +313,7 @@ Always return only the subtopic name without additional explanations.
             "content": f"""
             Subtopic: "{subtopic.topic}"
             Critically respond to the discussion so far, building on prior messages. 
-            Stay focused on the subtopic and propose new ideas, counterpoints, or solutions but not using more than 200 tokens.
+            Stay focused on the subtopic and propose new ideas, counterpoints, or solutions but not using more than 200 tokens and also dont mention the subtopic or topics just your true natural thoughts.
             """
         })
 
@@ -322,10 +322,10 @@ Always return only the subtopic name without additional explanations.
                 model="gpt-4o-mini",
                 messages=messages,
                 max_tokens=250,
-                temperature=0.6,
-                top_p=0.7,
-                frequency_penalty=1,
-                presence_penalty=2
+                temperature=0.95,  # Increased for more randomness
+                top_p=0.95,       # Increased to allow more token variety
+                frequency_penalty=1.5,  # Increased to discourage common phrases
+                presence_penalty=1.8,   
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
