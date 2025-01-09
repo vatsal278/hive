@@ -259,56 +259,34 @@ Always return only the subtopic name without additional explanations.
                 })
                 await asyncio.sleep(3)  # Add delay between messages
 
-    async def _generate_response(self, agent_info: dict, subtopic: Subtopic) -> str:
-        recent_messages = subtopic.messages[-10:]
+    async async def _generate_response(self, agent_info: dict, subtopic: Subtopic) -> str:
+        history = "\n".join([f"{m.agent}: {m.content}" for m in subtopic.messages[-5:]])
+        personality = agent_info["personality"]
         
-        messages = [
-            {"role": "system", "content": """
-            You are an AI agent participating in a collaborative and intense brainstorming session with other AI agents. 
-            The discussion is focused on a specific subtopic derived from a larger main topic. Your task is to:
-            1. Respond directly and concisely to the subtopic or recent conversation.
-            2. Debate, brainstorm, and critically analyze ideas presented by other agents. Always aim to:
-               - Challenge assumptions.
-               - Identify problems and solutions.
-               - Propose actionable insights or innovative ideas.
-            3. Reference context from:
-               - The immediate conversation (recent messages).
-               - Medium-term context (earlier exchanges in this session).
-               - Long-term context (the overarching subtopic and main topic).
-            ### **Rules of Engagement**:
-            - Do NOT greet other agents or introduce yourself. Assume all agents already know your expertise and personality.
-            - Do NOT use polite or formal phrases like "I believe," "In my opinion," or "Thank you."
-            - Assume all agents are experts in their fields, so avoid redundant explanations of basic concepts.
-            - Collaborate with other agents and pick their good points and include that in talk.
-            - Assume you and the other agents share access to all historical messages and know the subtopic.
-            - Don't be repetitive, give website links if available
-            - make sure you don't break character and looking like having a discsussion
-            """}
-        ]
-    
-        messages.extend([
-            {"role": "assistant", "content": f"{msg.agent}: {msg.content}"}
-            for msg in recent_messages
-        ])
+        prompt = f"""
+        {agent_info['system_prompt']}
+        Personality Profile:
+        - Core trait: {personality['core_trait']}
+        - Communication style: {personality['communication_style']}
+        - Current trait focus: {agent_info['selected_personality']}
+        - Approach: {personality['approach']}
 
-        messages.append({
-            "role": "user",
-            "content": f"""
-            Subtopic: "{subtopic.topic}"
-            Critically respond to the discussion so far, building on prior messages. 
-            Stay focused on the subtopic and propose new ideas, counterpoints, or solutions but not using more than 200 tokens and also dont mention the subtopic or topics just your true natural thoughts.
-            """
-        })
-
+        Topic: {subtopic.topic}
+        Previous messages:
+        {history}
+        
+        Respond according to your expertise and personality profile.
+        """
+        
         try:
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=messages,
-                max_tokens=250,
-                temperature=0.95,  # Increased for more randomness
-                top_p=0.95,       # Increased to allow more token variety
-                frequency_penalty=1.5,  # Increased to discourage common phrases
-                presence_penalty=1.8,   
+                messages=[
+                    {"role": "system", "content": "Engage in focused discussion while maintaining your defined personality."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=150,
+                temperature=0.7
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
