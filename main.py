@@ -269,56 +269,153 @@ class DiscussionManager:
         return behaviors.get(disc_type, {}).get(phase, "contribute based on discussion needs")
 
     async def _generate_response(self, agent_info: dict, subtopic: Subtopic) -> str:
-        recent_messages = subtopic.messages
         current_phase = get_phase_for_round(self.current_round)
+        
+        # Organize messages by rounds
+        messages_by_round = {}
+        current_round_messages = []
+        
+        for msg in subtopic.messages:
+            # Calculate message round based on position
+            msg_round = (len(subtopic.messages) // len(subtopic.agents)) + 1
+            
+            # Separate current round messages
+            if msg_round == self.current_round:
+                current_round_messages.append(msg)
+            else:
+                if msg_round not in messages_by_round:
+                    messages_by_round[msg_round] = []
+                messages_by_round[msg_round].append(msg)
 
-        # Format recent messages for context
-        formatted_recent_messages = "\n".join(
-            f"{msg.agent}: {msg.content}" for msg in recent_messages
-        )
+        # Track questions and key points
+        current_questions = []
+        recent_key_points = []
+        
+        # Get agent profiles for context
+        agent_profiles = {
+            agent_id: {
+                "disc_type": traits["disc_type"],
+                "expertise": traits["expertise"],
+                "core_trait": traits["core_trait"]
+            }
+            for agent_id, traits in subtopic.agent_traits.items()
+        }
 
-        system_prompt = """
-        You are an expert participating in a structured group discussion.
+        system_prompt = f"""
+        You are an expert participating in a structured group discussion about '{subtopic.topic}' 
+        as part of exploring '{self.discussion.main_topic}'.
 
-        - Contribute meaningfully to the topic by varying your response style:
-        - Provide constructive ideas or actionable solutions.
-        - Offer critical evaluations or alternative perspectives.
-        - Pose thoughtful clarifying or exploratory questions.
-        - Show appreciation or acknowledge the value of others' contributions.
-        - Alternate your response style based on the context of the discussion and the points raised by other participants.
-        - Ensure your responses are concise, limited to 2-3 sentences.
-        - Use a tone that is professional, engaging, and aligned with the flow of the discussion.
-        - Avoid meta-commentary, greetings, or explicit mentions of roles, types, or discussion phases.
+        Your Profile:
+        - Agent ID: {agent_info['id']}
+        - DISC Type: {agent_info['disc_type']}
+        - Expertise: {', '.join(agent_info['expertise'])}
+        - Core Trait: {agent_info['personality']['core_trait']}
+
+        Other Participants:
+        {chr(10).join(f"- {aid} ({prof['disc_type']} type, Expert in: {', '.join(prof['expertise'])})" for aid, prof in agent_profiles.items() if aid != agent_info['id'])}
+
+        Response Guidelines:
+        - Vary your response style based on context:
+            * Build on others' points with supporting evidence
+            * Challenge perspectives with constructive counterpoints
+            * Share insights from your expertise
+            * Bridge different viewpoints
+            * Ask questions only when truly needed
+            * Make decisive statements or recommendations
+            * Offer analytical observations
+        - Reference other agents by their ID when responding
+        - Keep responses concise (2-3 sentences)
+        - End responses naturally - don't force questions
+        - Maintain professional and engaging tone
+        
+        Current Phase: {current_phase}
+        Phase Purpose: {PHASE_DISTRIBUTION[current_phase]['purpose']}
         """
-
-        assistant_prompt = f"""
-        As a {agent_info['disc_type']} type personality and an expert in {', '.join(agent_info['expertise'])}, 
-        approach the discussion in a {agent_info['personality']['core_trait']} style.
-
-        During this {current_phase} phase, which emphasizes {PHASE_DISTRIBUTION[current_phase]['purpose']}, 
-        focus on advancing the discussion by building on the following recent contributions:
-
-        {formatted_recent_messages}
-
-        Respond with insights, critiques, clarifications, or ideas that align with the current phase and topic.
-        """
-
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "assistant", "content": assistant_prompt}
-        ]
 
         try:
+            messages = [{"role": "system", "content": system_prompt}]
+            
+            # Add previous rounds context
+            for round_num in sorted(messages_by_round.keys()):
+                round_messages = messages_by_round[round_num]
+                round_phase = get_phase_for_round(round_num)
+                
+                # Format messages with agent profiles
+                round_context = []
+                for msg in round_messages:
+                    agent_disc = agent_profiles[msg.agent]["disc_type"]
+                    agent_expertise = ', '.join(agent_profiles[msg.agent]["expertise"])
+                    round_context.append(f"{msg.agent} ({agent_disc} type, Expert in: {agent_expertise}): {msg.content}")
+                
+                messages.append({
+                    "role": "assistant",
+                    "content": f"""Round {round_num} Discussion (Phase: {round_phase}):
+                    {PHASE_DISTRIBUTION[round_phase]['purpose']}
+                    
+                    {chr(10).join(round_context)}
+                    """
+                })
+            
+            # Add current round context
+            if current_round_messages:
+                current_context = []
+                for msg in current_round_messages:
+                    if '?' in msg.content:
+                        current_questions.append(f"{msg.agent}: {msg.content}")
+                    recent_key_points.append(f"{msg.agent}'s point: {msg.content}")
+                    
+                    agent_disc = agent_profiles[msg.agent]["disc_type"]
+                    agent_expertise = ', '.join(agent_profiles[msg.agent]["expertise"])
+                    current_context.append(f"{msg.agent} ({agent_disc} type, Expert in: {agent_expertise}): {msg.content}")
+
+                messages.append({
+                    "role": "assistant",
+                    "content": f"""Current Round {self.current_round} Discussion:
+                    Phase: {current_phase}
+                    Purpose: {PHASE_DISTRIBUTION[current_phase]['purpose']}
+                    
+                    {chr(10).join(current_context)}
+                    """
+                })
+            
+            # Final prompt
+            assistant_prompt = f"""
+            As {agent_info['id']}, engage in the discussion considering:
+            
+            Current State:
+            - Active Questions: {json.dumps(current_questions) if current_questions else "None pending"}
+            - Recent Key Points: {json.dumps(recent_key_points[-3:]) if recent_key_points else "Starting discussion"}
+            
+            Your Task:
+            Choose one of these response approaches based on context:
+            1. Analytical: Evaluate and assess previous points
+            2. Supportive: Build upon and strengthen others' arguments
+            3. Challenging: Respectfully present alternative viewpoints
+            4. Synthesizing: Connect different perspectives
+            5. Decisive: Make clear statements or recommendations
+            6. Questioning: Only if critical information is missing
+            
+            Remember to:
+            - Reference specific agents and their points
+            - Connect to your expertise naturally
+            - End responses in a way that fits the chosen approach
+            - Advance the {PHASE_DISTRIBUTION[current_phase]['purpose']} objective
+            """
+            
+            messages.append({"role": "user", "content": assistant_prompt})
+
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=messages,
                 max_tokens=200,
                 temperature=0.8,
                 top_p=0.7,
-                frequency_penalty=1,  # Penalizes frequent tokens
-                presence_penalty=2    # Penalizes previously used tokens
+                frequency_penalty=1,
+                presence_penalty=2
             )
+            
             return response.choices[0].message.content.strip()
+        
         except Exception as e:
             logging.error(f"Error generating response: {e}")
             return "Error generating response."
