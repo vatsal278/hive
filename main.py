@@ -1,12 +1,13 @@
 from openai import OpenAI
-import asyncio, json, time, uuid, logging, os, threading
+import asyncio, json, time, uuid, logging, os, threading, re
 from pathlib import Path
 from flask import Flask, jsonify, request
 from flask_socketio import SocketIO
 from flask_cors import CORS
 from dotenv import load_dotenv
 from dataclasses import dataclass, asdict, field
-from typing import List, Optional
+from typing import List, Optional, Tuple, Dict, Union
+from threading import Lock
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -22,8 +23,14 @@ socketio = SocketIO(app,
     allow_unsafe_werkzeug=True
 )
 
-# Constants for DISC and Phases
+# Constants
 DISC_TYPES = ["D", "I", "S", "C"]
+
+TOPIC_CONSTRAINTS = {
+    "min_length": 3,
+    "max_length": 200,
+    "max_topics": 50  # Maximum number of topics allowed in queue
+}
 
 PHASE_DISTRIBUTION = {
     "INITIATION": {
@@ -62,6 +69,18 @@ PHASE_DISTRIBUTION = {
         "behaviors": ["Summarize learnings", "Frame implications"]
     }
 }
+
+# Custom Exceptions
+class TopicManagementError(Exception):
+    """Base exception for topic management errors."""
+    pass
+
+class TopicValidationError(TopicManagementError):
+    """Exception raised for topic validation errors."""
+    def __init__(self, message: str, invalid_topics: List[str]):
+        self.message = message
+        self.invalid_topics = invalid_topics
+        super().__init__(self.message)
 
 # Helper Functions
 def safe_emit(event, data):
@@ -122,8 +141,152 @@ class DiscussionManager:
         self.is_processing = False
         self.topics = []
         self.current_round = 0
-        self.total_rounds = 2
+        self.total_rounds = 1
+        self.topics_lock = Lock()
+        self.max_topics = TOPIC_CONSTRAINTS["max_topics"]
         self.load_topics_from_env()
+
+    def validate_topic(self, topic: str) -> Tuple[bool, Optional[str]]:
+        """
+        Validate a single topic string.
+        
+        Args:
+            topic: The topic string to validate
+            
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        if not isinstance(topic, str):
+            return False, "Topic must be a string"
+            
+        topic = topic.strip()
+        
+        if len(topic) < TOPIC_CONSTRAINTS["min_length"]:
+            return False, f"Topic too short (minimum {TOPIC_CONSTRAINTS['min_length']} characters)"
+            
+        if len(topic) > TOPIC_CONSTRAINTS["max_length"]:
+            return False, f"Topic too long (maximum {TOPIC_CONSTRAINTS['max_length']} characters)"
+            
+        # Check for valid characters (alphanumeric, spaces, and basic punctuation)
+        if not re.match(r'^[\w\s.,!?()-]+$', topic):
+            return False, "Topic contains invalid characters"
+            
+        return True, None
+
+    def validate_topics(self, topics: List[str]) -> Dict[str, List[Dict[str, str]]]:
+        """
+        Validate a list of topics.
+        
+        Args:
+            topics: List of topic strings to validate
+            
+        Returns:
+            Dictionary containing valid and invalid topics with reasons
+        """
+        result = {
+            "valid": [],
+            "invalid": []
+        }
+        
+        seen_topics = set()
+        
+        for topic in topics:
+            if not topic:
+                continue
+                
+            is_valid, error_msg = self.validate_topic(topic)
+            
+            if is_valid:
+                # Check for duplicates
+                if topic in seen_topics:
+                    result["invalid"].append({
+                        "topic": topic,
+                        "reason": "Duplicate topic"
+                    })
+                else:
+                    seen_topics.add(topic)
+                    result["valid"].append(topic)
+            else:
+                result["invalid"].append({
+                    "topic": topic,
+                    "reason": error_msg
+                })
+                
+        return result
+
+    def add_topics(self, new_topics: List[str]) -> Tuple[bool, Dict[str, Union[str, List[str], List[Dict[str, str]]]]]:
+        """
+        Add new topics to the discussion queue.
+        
+        Args:
+            new_topics: List of topic strings to add
+            
+        Returns:
+            Tuple of (success, result_dict)
+        """
+        try:
+            with self.topics_lock:
+                # Validate topics
+                validation_result = self.validate_topics(new_topics)
+                valid_topics = validation_result["valid"]
+                invalid_topics = validation_result["invalid"]
+                
+                if not valid_topics:
+                    return False, {
+                        "status": "error",
+                        "message": "No valid topics provided",
+                        "invalid_topics": invalid_topics
+                    }
+                
+                # Check queue capacity
+                current_queue_size = len(self.topics)
+                if current_queue_size + len(valid_topics) > self.max_topics:
+                    return False, {
+                        "status": "error",
+                        "message": f"Topic queue full. Maximum {self.max_topics} topics allowed.",
+                        "current_queue_size": current_queue_size
+                    }
+                
+                # Add valid topics to the queue
+                self.topics.extend(valid_topics)
+                
+                # Update environment variable
+                current_env_topics = os.getenv("TOPICS", "").split(",")
+                current_env_topics.extend(valid_topics)
+                filtered_env_topics = [t.strip() for t in current_env_topics if t.strip()]
+                os.environ["TOPICS"] = ",".join(filtered_env_topics)
+                
+                logging.info(f"Added {len(valid_topics)} new topics to queue")
+                
+                return True, {
+                    "status": "success",
+                    "message": "Topics added successfully",
+                    "topics_added": valid_topics,
+                    "invalid_topics": invalid_topics,
+                    "queue_size": len(self.topics)
+                }
+                
+        except Exception as e:
+            logging.error(f"Error adding topics: {e}")
+            return False, {
+                "status": "error",
+                "message": f"Internal error: {str(e)}",
+                "error_type": type(e).__name__
+            }
+
+    def get_topics_status(self) -> Dict[str, Union[int, List[str]]]:
+        """
+        Get current status of the topic queue.
+        
+        Returns:
+            Dictionary with queue status information
+        """
+        with self.topics_lock:
+            return {
+                "total_topics": len(self.topics),
+                "remaining_capacity": self.max_topics - len(self.topics),
+                "current_topics": self.topics.copy()
+            }
 
     def load_topics_from_env(self):
         """Load topics from environment variables."""
@@ -462,7 +625,7 @@ Response Guidelines for Agent References:
                 })
                 
                 self.current_round += 1
-                await asyncio.sleep(3)
+                await asyncio.sleep(7)
 
     async def _run_head_agent(self, subtopic: Subtopic):
         messages = "\n".join([f"{m.agent}: {m.content}" for m in subtopic.messages])
@@ -763,6 +926,74 @@ def get_subtopic_details(subtopic_id):
                 })
                 
     return jsonify({"error": "Subtopic not found"}), 404
+
+@app.route("/topics", methods=["POST"])
+def add_topics():
+    """Add new topics to the discussion queue."""
+    try:
+        # Validate request
+        if not request.is_json:
+            return jsonify({
+                "status": "error",
+                "message": "Content-Type must be application/json"
+            }), 400
+            
+        data = request.get_json()
+        if not data or "topics" not in data:
+            return jsonify({
+                "status": "error",
+                "message": "Request must include 'topics' field"
+            }), 400
+            
+        topics = data["topics"]
+        if not isinstance(topics, list):
+            return jsonify({
+                "status": "error",
+                "message": "'topics' must be a list of strings"
+            }), 400
+            
+        # Get discussion manager and add topics
+        discussion_manager = app.config['discussion_manager']
+        success, result = discussion_manager.add_topics(topics)
+        
+        if success:
+            return jsonify(result), 201
+        else:
+            # Determine appropriate status code based on error type
+            if result["status"] == "error":
+                if "queue full" in result["message"].lower():
+                    return jsonify(result), 409  # Conflict
+                elif "no valid topics" in result["message"].lower():
+                    return jsonify(result), 400  # Bad Request
+                else:
+                    return jsonify(result), 500  # Internal Server Error
+                    
+    except Exception as e:
+        logging.error(f"Error processing topics request: {e}")
+        return jsonify({
+            "status": "error",
+            "message": "Internal server error",
+            "error_type": type(e).__name__
+        }), 500
+
+@app.route("/topics", methods=["GET"])
+def get_topics_status():
+    """Get current status of the topic queue."""
+    try:
+        discussion_manager = app.config['discussion_manager']
+        status = discussion_manager.get_topics_status()
+        return jsonify({
+            "status": "success",
+            "data": status
+        }), 200
+        
+    except Exception as e:
+        logging.error(f"Error getting topics status: {e}")
+        return jsonify({
+            "status": "error",
+            "message": "Internal server error",
+            "error_type": type(e).__name__
+        }), 500
 
 @app.route("/objectives")
 def get_objectives():
