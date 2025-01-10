@@ -141,7 +141,7 @@ class DiscussionManager:
         self.is_processing = False
         self.topics = []
         self.current_round = 0
-        self.total_rounds = 1
+        self.total_rounds = 12
         self.topics_lock = Lock()
         self.max_topics = TOPIC_CONSTRAINTS["max_topics"]
         self.load_topics_from_env()
