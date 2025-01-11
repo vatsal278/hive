@@ -625,7 +625,7 @@ Response Guidelines for Agent References:
                 })
                 
                 self.current_round += 1
-                await asyncio.sleep(7)
+                await asyncio.sleep(15)
 
     async def _run_head_agent(self, subtopic: Subtopic):
         messages = "\n".join([f"{m.agent}: {m.content}" for m in subtopic.messages])
